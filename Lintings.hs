@@ -12,6 +12,9 @@ import LintTypes
 freeVariables :: Expr -> [Name]
 freeVariables = undefined
 
+auxiliar :: Expr -> Expr -> (Expr, [LintSugg])
+auxilar Lit(LitInt num1) Lit(LitInt num2) = (Lit(LitInt ((+) num1 num2)), LintCompCst (Lit(LitInt num1) Lit(LitInt num2)) (Lit(LitInt ((+) num1 num2))) : [])
+auxiliar left right = (Infix Add left right, [])
 
 --------------------------------------------------------------------------------
 -- LINTINGS
@@ -27,7 +30,19 @@ freeVariables = undefined
 -- Reduce expresiones aritméticas/booleanas
 -- Construye sugerencias de la forma (LintCompCst e r)
 lintComputeConstant :: Linting Expr
-lintComputeConstant = undefined
+lintComputeConstant expr
+  | Lit(LitInt num) <- expr =
+    (expr, []) 
+  | Infix Add left right <- expr =
+      let (lRes, lSugg) = lintComputeConstant left
+          (rRes, rSugg) = lintComputeConstant right
+          (result, rootSugg) = auxiliar lRes rRes
+          in (result, lSugg ++ rSugg ++ rootSugg) 
+
+
+  
+
+        
 
 
 --------------------------------------------------------------------------------
