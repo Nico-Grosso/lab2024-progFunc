@@ -12,10 +12,6 @@ import LintTypes
 freeVariables :: Expr -> [Name]
 freeVariables = undefined
 
-auxiliar :: Expr -> Expr -> (Expr, [LintSugg])
-auxilar Lit(LitInt num1) Lit(LitInt num2) = (Lit(LitInt ((+) num1 num2)), LintCompCst (Lit(LitInt num1) Lit(LitInt num2)) (Lit(LitInt ((+) num1 num2))) : [])
-auxiliar left right = (Infix Add left right, [])
-
 --------------------------------------------------------------------------------
 -- LINTINGS
 --------------------------------------------------------------------------------
@@ -26,24 +22,23 @@ auxiliar left right = (Infix Add left right, [])
 -- Computación de constantes
 --------------------------------------------------------------------------------
 
+
+evalConstant :: Expr -> (Expr, [LintSugg])
+evalConstant expr = case expr of
+  Lit lit -> (Lit lit, [])
+  Var variable -> (var variable, [])
+  Case expr1 expr2 (x, xs, expr3) ->
+    let (result1, sugg1) = evalConstant expr1
+      (result2, sugg2) = evalConstant expr2
+      (result3, sugg3) = evalConstant expr3
+      in (Case result1 result2 (x, xs, result3), sugg1 ++ sugg2 ++ sugg3)
+
+
 --------------------------------------------------------------------------------
 -- Reduce expresiones aritméticas/booleanas
 -- Construye sugerencias de la forma (LintCompCst e r)
 lintComputeConstant :: Linting Expr
-lintComputeConstant expr
-  | Lit(LitInt num) <- expr =
-    (expr, []) 
-  | Infix Add left right <- expr =
-      let (lRes, lSugg) = lintComputeConstant left
-          (rRes, rSugg) = lintComputeConstant right
-          (result, rootSugg) = auxiliar lRes rRes
-          in (result, lSugg ++ rSugg ++ rootSugg) 
-
-
-  
-
-        
-
+lintComputeConstant expr = evalConstant expr
 
 --------------------------------------------------------------------------------
 -- Eliminación de chequeos redundantes de booleanos
@@ -130,17 +125,33 @@ lintMap = undefined
 -- Combinación de Lintings
 --------------------------------------------------------------------------------
 
+getExpr :: FunDef -> Expr
+getExpr (FunDef n e) = e
+
+getName :: FunDef -> Name 
+getName (FunDef n e) = n
 
 -- Dada una transformación a nivel de expresión, se construye
 -- una transformación a nivel de función
 liftToFunc :: Linting Expr -> Linting FunDef
-liftToFunc = undefined
+liftToFunc lintExpr func = 
+    let (resultExpr, suggExpr) = lintExpr (getExpr func)
+        funcResult = FunDef (getName func) resultExpr
+        in (funcResult, suggExpr)
 
 -- encadenar transformaciones:
 (>==>) :: Linting a -> Linting a -> Linting a
-lint1 >==> lint2 = undefined
+lint1 >==> lint2 = \expr ->
+    let (result1, sugg1) = lint1 expr
+        (resultFinal, sugg2) = lint2 result1
+    in (resultFinal, sugg1 ++ sugg2)
 
 -- aplica las transformaciones 'lints' repetidas veces y de forma incremental,
 -- hasta que ya no generen más cambios en 'func'
 lintRec :: Linting a -> Linting a
-lintRec lints func = undefined
+lintRec lints func = 
+    let (resultLint, listSugg) = lints func
+        in if (null listSugg) then (resultLint, listSugg)
+            else 
+                let (resultLintNuevo, listSugg2) = lintRec lints resultLint
+                in (resultLintNuevo, listSugg ++ listSugg2)
