@@ -22,16 +22,77 @@ freeVariables = undefined
 -- Computación de constantes
 --------------------------------------------------------------------------------
 
+evalBool :: Lit -> Bool
+evalBool (LitBool x) = x
+
+evalInt :: Lit -> Integer
+evalInt (LitInt lit) = lit
+
+evalOp :: Op -> Lit -> Lit -> (Lit, Bool)
+evalOp Add lit1 lit2 =
+  let res1 = evalInt lit1
+      res2 = evalInt lit2
+      result = res1 + res2
+  in (LitInt result, True)
+evalOp Sub lit1 lit2 = 
+  let res1 = evalInt lit1
+      res2 = evalInt lit2
+      result = res1 - res2
+  in if (res1 >= res2) then (LitInt result, True) else (LitNil, False)
+evalOp Mult lit1 lit2 =
+  let res1 = evalInt lit1
+      res2 = evalInt lit2
+      result = res1*res2
+  in (LitInt result, True)
+evalOp Div lit1 lit2 =
+  let res1 = evalInt lit1
+      res2 = evalInt lit2
+  in if (res2 == 0) then (LitNil, False) else (LitInt (div res1 res2), True)
+evalOp And lit1 lit2 =
+  let res1 = evalBool lit1
+      res2 = evalBool lit2
+      res = res1 && res2
+  in (LitBool res, True)
+evalOp Or lit1 lit2 =
+  let res1 = evalBool lit1
+      res2 = evalBool lit2
+      res = res1 || res2
+  in (LitBool res, True)
 
 evalConstant :: Expr -> (Expr, [LintSugg])
 evalConstant expr = case expr of
   Lit lit -> (Lit lit, [])
-  Var variable -> (var variable, [])
+  Var variable -> (Var variable, [])
   Case expr1 expr2 (x, xs, expr3) ->
     let (result1, sugg1) = evalConstant expr1
-      (result2, sugg2) = evalConstant expr2
-      (result3, sugg3) = evalConstant expr3
-      in (Case result1 result2 (x, xs, result3), sugg1 ++ sugg2 ++ sugg3)
+        (result2, sugg2) = evalConstant expr2
+        (result3, sugg3) = evalConstant expr3
+    in (Case result1 result2 (x, xs, result3), sugg3 ++ sugg2 ++ sugg1)
+  App expr1 expr2 ->
+    let (result1, sugg1) = evalConstant expr1
+        (result2, sugg2) = evalConstant expr2
+    in (App result1 result2, sugg1 ++ sugg2)
+  Lam nom expr ->
+    let (result, sugg) = evalConstant expr
+    in (Lam nom result, sugg)
+  If cond expr1 expr2 ->
+    let (result1, sugg1) = evalConstant cond
+        (result2, sugg2) = evalConstant expr1
+        (result3, sugg3) = evalConstant expr2
+    in (If result1 result2 result3, sugg2 ++ sugg3 ++ sugg1)
+  Infix op expr1 expr2 ->
+    let (result1, sugg1) = evalConstant expr1
+        (result2, sugg2) = evalConstant expr2
+    in case result1 of 
+      Lit lit1 -> case result2 of
+        Lit lit2 -> 
+          let (res, changed) = evalOp op lit1 lit2
+              exprSugg = LintCompCst (Infix op (Lit lit1) (Lit lit2)) (Lit res)
+          in case changed of
+            True -> ((Lit res), sugg1 ++ sugg2 ++ exprSugg:[])
+            otherwise -> (Infix op (Lit lit1) (Lit lit2), sugg1 ++ sugg2)
+        otherwise -> (Infix op result1 result2, sugg1 ++ sugg2)
+      otherwise -> (Infix op result1 result2, sugg1 ++ sugg2)
 
 
 --------------------------------------------------------------------------------
