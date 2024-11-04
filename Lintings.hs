@@ -105,28 +105,124 @@ lintComputeConstant expr = evalConstant expr
 -- Eliminación de chequeos redundantes de booleanos
 --------------------------------------------------------------------------------
 
+-- Función auxiliar que evalúa una Lit y se fija si es un booleano True
+isTrue :: Lit -> Bool
+isTrue(LitBool i) = (i==True)
+isTrue (_) = False
+
+-- Función auxiliar que evalúa una Lit y se fija si es un booleano False
+isFalse :: Lit -> Bool
+isFalse(LitBool i) = (i==False)
+isFalse (_) = False
+
+-- Función auxiliar que evalúa una Expr y elimina chequeos redundantes de booleanos
+evalChequeo :: Expr -> (Expr, [LintSugg])
+evalChequeo e = case e of
+  Var nom -> (Var nom, [])
+  Lit lit -> (Lit lit, [])
+  App e1 e2 -> do
+    let (eResult1, listSug1) = evalChequeo e1
+    let (eResult2, listSug2) = evalChequeo e2
+    (App eResult1 eResult2, listSug1 ++ listSug2)
+  Lam nom e1 -> do
+    let (result, listSug) = evalChequeo e1
+    (Lam nom result, listSug)
+  Case e1 e2 (nom1, nom2, e3) -> do
+    let (eResult1, listSug1) = evalChequeo e1
+    let (eResult2, listSug2) = evalChequeo e2
+    let (eResult3, listSug3) = evalChequeo e3
+    (Case eResult1 eResult2 (nom1, nom2, eResult3), listSug1 ++ listSug2 ++ listSug3)
+  If e1 e2 e3 -> do
+    let (eResult1, listSug1) = evalChequeo e1
+    let (eResult2, listSug2) = evalChequeo e2
+    let (eResult3, listSug3) = evalChequeo e3
+    (If eResult1 eResult2 eResult3, listSug1 ++ listSug2 ++ listSug3)
+  Infix op e1 e2 -> do
+    let (eResult1, listSug1)= evalChequeo e1
+    let (eResult2, listSug2)= evalChequeo e2
+    case op of
+      Eq -> case eResult1 of
+        Lit l1 -> if isTrue l1 then do
+            let expSugg = LintBool (Infix op (Lit l1) eResult2) (eResult2)
+            (eResult2, expSugg : listSug1 ++ listSug2)
+          else if isFalse l1 then do
+            let expSugg = LintBool (Infix op (Lit l1) eResult2) (App (Var "not") eResult2)
+            (App (Var "not") eResult2, expSugg : listSug1 ++ listSug2)
+          else (Infix op eResult1 eResult2, listSug1 ++ listSug2)
+        otherwise -> case eResult2 of
+              Lit l2 -> if isTrue l2 then do
+                  let expSugg = LintBool (Infix op (eResult1) (Lit l2)) (eResult1)  
+                  (eResult1, expSugg : listSug1 ++ listSug2)
+                else if isFalse l2 then do
+                  let expSugg = LintBool (Infix op (eResult1) (Lit l2)) (App (Var "not") eResult1)
+                  (App (Var "not") eResult1, expSugg : listSug1 ++ listSug2)
+                else (Infix op eResult1 eResult2, listSug1 ++ listSug2)
+              otherwise -> (Infix op eResult1 eResult2, listSug1 ++ listSug2)
+      otherwise -> (Infix op eResult1 eResult2, listSug1 ++ listSug2)
+
 --------------------------------------------------------------------------------
 -- Elimina chequeos de la forma e == True, True == e, e == False y False == e
 -- Construye sugerencias de la forma (LintBool e r)
 lintRedBool :: Linting Expr
-lintRedBool = undefined
+lintRedBool expr = evalChequeo expr
 
 
 --------------------------------------------------------------------------------
 -- Eliminación de if redundantes
 --------------------------------------------------------------------------------
 
+evalIfCond :: Expr -> (Expr, [LintSugg])
+evalIfCond expr = case expr of
+  Var n -> (Var n, [])
+  Lit lit -> (Lit lit, [])
+  Lam nom expr2 ->
+    let (result2, sugg2) = evalIfCond expr2
+    in (Lam nom result2, sugg2)
+  App expr1 expr2 ->
+    let (result1, sugg1) = evalIfCond expr1
+        (result2, sugg2) = evalIfCond expr2
+    in (App result1 result2, sugg1 ++ sugg2)
+  Case expr1 expr2 (nom1, nom2, expr3) ->
+    let (result1, sugg1) = evalIfCond expr1
+        (result2, sugg2) = evalIfCond expr2
+        (result3, sugg3) = evalIfCond expr3
+    in (Case result1 result2 (nom1, nom2, result3), sugg3 ++ sugg2 ++ sugg1)
+  Infix op expr1 expr2 ->
+    let (result1, sugg1) = evalIfCond expr1
+        (result2, sugg2) = evalIfCond expr2
+    in (Infix op result1 result2, sugg1 ++ sugg2)
+  If cond expr1 expr2 ->
+    let (result1, sugg1) = evalIfCond expr1
+        (result2, sugg2) = evalIfCond expr2
+        (resultCond, suggCond) = evalIfCond cond
+    in case resultCond of
+      Lit lit -> if isTrue lit then
+          let exprSugg = LintRedIf (If (Lit lit) result1 result2) (result1)
+          in (result1, suggCond ++ sugg1 ++ sugg2 ++ exprSugg : [])
+        else if isFalse lit then
+          let exprSugg = LintRedIf (If cond result1 result2) (result2)
+          in (result2, suggCond ++ sugg1 ++ sugg2 ++ exprSugg : [])
+        else
+          (If resultCond result1 result2, suggCond ++ sugg1 ++ sugg2)
+      otherwise -> (If resultCond result1 result2, suggCond ++ sugg1 ++ sugg2)
+
+
 --------------------------------------------------------------------------------
 -- Sustitución de if con literal en la condición por la rama correspondiente
 -- Construye sugerencias de la forma (LintRedIf e r)
 lintRedIfCond :: Linting Expr
-lintRedIfCond = undefined
+lintRedIfCond expr = evalIfCond expr
+
+
+evalIfAnd :: Expr -> (Expr, [LintSugg])
+evalIfAnd expr = case expr of
+  
 
 --------------------------------------------------------------------------------
 -- Sustitución de if por conjunción entre la condición y su rama _then_
 -- Construye sugerencias de la forma (LintRedIf e r)
 lintRedIfAnd :: Linting Expr
-lintRedIfAnd = undefined
+lintRedIfAnd expr = evalIfAnd expr 
 
 --------------------------------------------------------------------------------
 -- Sustitución de if por disyunción entre la condición y su rama _else_
