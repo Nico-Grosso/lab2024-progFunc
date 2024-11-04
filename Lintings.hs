@@ -216,7 +216,36 @@ lintRedIfCond expr = evalIfCond expr
 
 evalIfAnd :: Expr -> (Expr, [LintSugg])
 evalIfAnd expr = case expr of
-  
+  Var n -> (Var n, [])
+  Lit lit -> (Lit lit, [])
+  Lam nom expr2 ->
+    let (result2, sugg2) = evalIfAnd expr2
+    in (Lam nom result2, sugg2)
+  App expr1 expr2 ->
+    let (result1, sugg1) = evalIfAnd expr1
+        (result2, sugg2) = evalIfAnd expr2
+    in (App result1 result2, sugg1 ++ sugg2)
+  Case expr1 expr2 (nom1, nom2, expr3) ->
+    let (result1, sugg1) = evalIfAnd expr1
+        (result2, sugg2) = evalIfAnd expr2
+        (result3, sugg3) = evalIfAnd expr3
+    in (Case result1 result2 (nom1, nom2, result3), sugg3 ++ sugg2 ++ sugg1)
+  Infix op expr1 expr2 ->
+    let (result1, sugg1) = evalIfAnd expr1
+        (result2, sugg2) = evalIfAnd expr2
+    in (Infix op result1 result2, sugg1 ++ sugg2)
+  If cond expr1 expr2 ->
+    let (result1, sugg1) = evalIfAnd expr1
+        (result2, sugg2) = evalIfAnd expr2
+        (resultCond, suggCond) = evalIfAnd cond
+    in case result2 of
+      Lit lit -> if isFalse lit then
+          let res = Infix And resultCond result1
+              exprSugg = LintRedIf (If resultCond result1 (Lit lit)) (res)
+          in (res, suggCond ++ sugg1 ++ sugg2 ++ exprSugg : [])
+        else
+          (If resultCond result1 result2, suggCond ++ sugg1 ++ sugg2)
+      otherwise -> (If resultCond result1 result2, suggCond ++ sugg1 ++ sugg2)
 
 --------------------------------------------------------------------------------
 -- Sustitución de if por conjunción entre la condición y su rama _then_
@@ -224,11 +253,46 @@ evalIfAnd expr = case expr of
 lintRedIfAnd :: Linting Expr
 lintRedIfAnd expr = evalIfAnd expr 
 
+
+evalIfOr :: Expr -> (Expr, [LintSugg])
+evalIfOr expr = case expr of
+  Var n -> (Var n, [])
+  Lit lit -> (Lit lit, [])
+  Lam nom expr2 ->
+    let (result2, sugg2) = evalIfOr expr2
+    in (Lam nom result2, sugg2)
+  App expr1 expr2 ->
+    let (result1, sugg1) = evalIfOr expr1
+        (result2, sugg2) = evalIfOr expr2
+    in (App result1 result2, sugg1 ++ sugg2)
+  Case expr1 expr2 (nom1, nom2, expr3) ->
+    let (result1, sugg1) = evalIfOr expr1
+        (result2, sugg2) = evalIfOr expr2
+        (result3, sugg3) = evalIfOr expr3
+    in (Case result1 result2 (nom1, nom2, result3), sugg3 ++ sugg2 ++ sugg1)
+  Infix op expr1 expr2 ->
+    let (result1, sugg1) = evalIfOr expr1
+        (result2, sugg2) = evalIfOr expr2
+    in (Infix op result1 result2, sugg1 ++ sugg2)
+  If cond expr1 expr2 ->
+    let (result1, sugg1) = evalIfOr expr1
+        (result2, sugg2) = evalIfOr expr2
+        (resultCond, suggCond) = evalIfOr cond
+    in case result1 of
+      Lit lit -> if isTrue lit then
+          let res = Infix Or resultCond result2
+              exprSugg = LintRedIf (If resultCond (Lit lit) result2) (res)
+          in (res, suggCond ++ sugg1 ++ sugg2 ++ exprSugg : [])
+        else
+          (If resultCond result1 result2, suggCond ++ sugg1 ++ sugg2)
+      otherwise -> (If resultCond result1 result2, suggCond ++ sugg1 ++ sugg2)
+
+
 --------------------------------------------------------------------------------
 -- Sustitución de if por disyunción entre la condición y su rama _else_
 -- Construye sugerencias de la forma (LintRedIf e r)
 lintRedIfOr :: Linting Expr
-lintRedIfOr = undefined
+lintRedIfOr expr = evalIfOr expr 
 
 --------------------------------------------------------------------------------
 -- Chequeo de lista vacía
